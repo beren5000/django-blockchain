@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+
+{% block title %}{{ registry.name }} - Registry{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h2>{{ registry.name }}</h2>
+            {% if registry.deployed %}
+            <div class="badge bg-success">Deployed</div>
+            {% else %}
+            <div class="badge bg-warning">Not Deployed</div>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <p>{{ registry.description }}</p>
+            
+            <div class="row mt-4">
+                <div class="col-md-6">
+                    <h4>Registry Information</h4>
+                    <dl class="row">
+                        <dt class="col-sm-4">Admin:</dt>
+                        <dd class="col-sm-8">{{ registry.admin.email }}</dd>
+                        
+                        <dt class="col-sm-4">Network:</dt>
+                        <dd class="col-sm-8">{{ registry.network }}</dd>
+                        
+                        {% if registry.deployed %}
+                        <dt class="col-sm-4">Contract Address:</dt>
+                        <dd class="col-sm-8">
+                            <a href="https://{{ registry.network }}.etherscan.io/address/{{ registry.address }}" target="_blank">{{ registry.address }}</a>
+                        </dd>
+                        
+                        <dt class="col-sm-4">Deployment Date:</dt>
+                        <dd class="col-sm-8">{{ registry.deployment_date }}</dd>
+                        {% endif %}
+                        
+                        <dt class="col-sm-4">Created:</dt>
+                        <dd class="col-sm-8">{{ registry.created_at }}</dd>
+                    </dl>
+                </div>
+                
+                <div class="col-md-6">
+                    {% if not registry.deployed and is_admin %}
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Deploy Registry</h5>
+                        </div>
+                        <div class="card-body">
+                            <p>
+                                This will deploy your registry contract to the {{ registry.network }} network.
+                                Make sure your wallet is connected and has enough funds.
+                            </p>
+                            
+                            <form method="post" action="{% url 'registry_deploy' registry.id %}" id="deployForm">
+                                {% csrf_token %}
+                                <div class="d-grid">
+                                    <button type="button" class="btn btn-primary" id="deployBtn">Deploy Registry</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    {% elif is_member and registry.deployed %}
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Your Data</h5>
+                        </div>
+                        <div class="card-body">
+                            {% if user_data.exists %}
+                            <div class="mb-3">
+                                <p><strong>Image Reference:</strong> 
+                                    {% if user_data.image_reference %}
+                                    <a href="{{ user_data.image_reference }}" target="_blank">{{ user_data.image_reference }}</a>
+                                    {% else %}
+                                    None
+                                    {% endif %}
+                                </p>
+                                <p><strong>Last Updated:</strong> {{ user_data.timestamp_readable|default:"Never" }}</p>
+                            </div>
+                            {% else %}
+                            <p>You haven't added any data yet.</p>
+                            {% endif %}
+                            
+                            <h5 class="mt-4">Update Your Data</h5>
+                            <form method="post" action="{% url 'update_user_data' registry.id %}" id="updateDataForm">
+                                {% csrf_token %}
+                                
+                                <div class="mb-3">
+                                    <label for="{{ update_form.image_reference.id_for_label }}" class="form-label">Image Reference</label>
+                                    {{ update_form.image_reference }}
+                                    <div class="form-text">{{ update_form.image_reference.help_text }}</div>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="button" class="btn btn-success" id="updateDataBtn">Update Data</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Registry Users Section -->
+            <div class="mt-5">
+                <h4>Registry Users</h4>
+                
+                {% if is_admin and registry.deployed %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5>Add Users</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="post" action="{% url 'registry_add_users' registry.id %}" id="addUsersForm">
+                            {% csrf_token %}
+                            
+                            <div class="mb-3">
+                                <label for="{{ user_form.users.id_for_label }}" class="form-label">{{ user_form.users.label }}</label>
+                                {{ user_form.users }}
+                            </div>
+                            
+                            <div class="d-grid">
+                                <button type="button" class="btn btn-primary" id="addUsersBtn">Add Selected Users</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Wallet Address</th>
+                                <th>Status</th>
+                                <th>Last Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for registry_user in registry_users %}
+                            <tr>
+                                <td>{{ registry_user.user.email }}</td>
+                                <td>
+                                    <span class="small">{{ registry_user.wallet_address|slice:":6" }}...{{ registry_user.wallet_address|slice:"-4:" }}</span>
+                                </td>
+                                <td>
+                                    {% if registry_user.is_authorized %}
+                                    <span class="badge bg-success">Authorized</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">Deauthorized</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ registry_user.last_updated|default:"Never" }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center">No users in this registry yet.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/web3@1.8.0/dist/web3.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Web3 buttons if they exist
+        const deployBtn = document.getElementById('deployBtn');
+        const updateDataBtn = document.getElementById('updateDataBtn');
+        const addUsersBtn = document.getElementById('addUsersBtn');
+        
+        // Function to handle web3 interactions
+        async function handleWeb3Action(formId) {
+            if (typeof window.ethereum === 'undefined') {
+                alert('MetaMask is not installed. Please install MetaMask to interact with the blockchain.');
+                return false;
+            }
+            
+            try {
+                // Request account access
+                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                if (accounts.length === 0) {
+                    alert('Please connect your MetaMask wallet.');
+                    return false;
+                }
+                
+                // Submit the form
+                document.getElementById(formId).submit();
+                return true;
+                
+            } catch (error) {
+                console.error('Error connecting to MetaMask:', error);
+                alert('Error connecting to wallet: ' + error.message);
+                return false;
+            }
+        }
+        
+        // Set up event listeners
+        if (deployBtn) {
+            deployBtn.addEventListener('click', function() {
+                handleWeb3Action('deployForm');
+            });
+        }
+        
+        if (updateDataBtn) {
+            updateDataBtn.addEventListener('click', function() {
+                handleWeb3Action('updateDataForm');
+            });
+        }
+        
+        if (addUsersBtn) {
+            addUsersBtn.addEventListener('click', function() {
+                handleWeb3Action('addUsersForm');
+            });
+        }
+    });
+
+    async function deployContract() {
+        if (typeof window.ethereum === 'undefined') {
+            alert('MetaMask is not installed. Please install MetaMask to deploy contracts.');
+            return;
+        }
+        
+        try {
+            // Request account access
+            const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts.length === 0) {
+                alert('Please connect your MetaMask wallet.');
+                return;
+            }
+            
+            // Display loading message
+            const deployBtn = document.getElementById('deployBtn');
+            deployBtn.disabled = true;
+            deployBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Preparing deployment...';
+            
+            // Get contract data from server
+            const response = await fetch('{% url "prepare_deployment" registry.id %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    wallet_address: accounts[0]
+                }),
+                timeout: 60000  // 60 seconds timeout
+            }).catch(error => {
+                console.error('Network error:', error);
+                throw new Error('Network error: Could not connect to server. Please try again.');
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to prepare deployment');
+            }
+            
+            // Update button
+            deployBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Waiting for confirmation...';
+            
+            // Sign and send transaction with MetaMask
+            const txHash = await ethereum.request({
+                method: 'eth_sendTransaction',
+                params: [data.transaction_data]
+            });
+            
+            alert('Transaction sent! Hash: ' + txHash + '\n\nWaiting for confirmation. This may take a few minutes.');
+            
+            // Poll for transaction receipt instead of waiting
+            pollForTransactionReceipt(txHash);
+            
+        } catch (error) {
+            console.error('Error deploying contract:', error);
+            alert('Error deploying contract: ' + error.message);
+            
+            // Reset button
+            const deployBtn = document.getElementById('deployBtn');
+            deployBtn.disabled = false;
+            deployBtn.textContent = 'Deploy Registry';
+        }
+    }
+
+    // Add this new function to poll for transaction receipt
+    function pollForTransactionReceipt(txHash, attempts = 0) {
+        const web3 = new Web3(window.ethereum);
+        const maxAttempts = 30; // Try for about 5 minutes (30 * 10 seconds)
+        
+        setTimeout(async () => {
+            try {
+                console.log(`Checking transaction receipt (attempt ${attempts + 1}/${maxAttempts})...`);
+                const receipt = await web3.eth.getTransactionReceipt(txHash);
+                
+                if (receipt) {
+                    console.log('Transaction confirmed:', receipt);
+                    
+                    // Send confirmation back to server
+                    const confirmResponse = await fetch('{% url "confirm_deployment" registry.id %}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCookie('csrftoken')
+                        },
+                        body: JSON.stringify({
+                            transaction_hash: txHash,
+                            contract_address: receipt.contractAddress
+                        })
+                    });
+                    
+                    const confirmData = await confirmResponse.json();
+                    
+                    if (confirmData.success) {
+                        alert('Contract deployed successfully!');
+                        window.location.reload();
+                    } else {
+                        alert('Error confirming deployment: ' + confirmData.error);
+                        
+                        // Reset button
+                        const deployBtn = document.getElementById('deployBtn');
+                        deployBtn.disabled = false;
+                        deployBtn.textContent = 'Deploy Registry';
+                    }
+                } else if (attempts < maxAttempts) {
+                    // Transaction not yet mined, keep polling
+                    pollForTransactionReceipt(txHash, attempts + 1);
+                } else {
+                    // Give up after max attempts
+                    alert('Transaction is taking longer than expected. Please check the status on Etherscan later.');
+                    
+                    // Reset button
+                    const deployBtn = document.getElementById('deployBtn');
+                    deployBtn.disabled = false;
+                    deployBtn.textContent = 'Deploy Registry';
+                }
+            } catch (error) {
+                console.error('Error checking transaction:', error);
+                
+                if (attempts < maxAttempts) {
+                    // Error occurred, but keep trying
+                    pollForTransactionReceipt(txHash, attempts + 1);
+                } else {
+                    alert('Error checking transaction status: ' + error.message);
+                    
+                    // Reset button
+                    const deployBtn = document.getElementById('deployBtn');
+                    deployBtn.disabled = false;
+                    deployBtn.textContent = 'Deploy Registry';
+                }
+            }
+        }, 10000); // Poll every 10 seconds
+    }
+
+    // Helper function to get CSRF token
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Update the deployBtn event listener
+    if (deployBtn) {
+        deployBtn.addEventListener('click', deployContract);
+    }
+</script>
+{% endblock %}

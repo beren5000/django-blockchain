@@ -1,0 +1,22 @@
+echo "# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django stuff
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media
+
+# Environment variables
+.env
+
+# Virtual environments
+venv/
+env/
+
+# sqlite3 files
+*.sqlite3
+*.sqlite3-journal

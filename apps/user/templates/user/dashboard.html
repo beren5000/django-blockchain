@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Django Blockchain{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h4>Welcome to Your Dashboard</h4>
+            </div>
+            <div class="card-body">
+                <h5 class="card-title">Hello, {{ user.first_name|default:user.email }}</h5>
+                
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title">Account Information</h5>
+                                <p><strong>Email:</strong> {{ user.email }}</p>
+                                <p><strong>Name:</strong> {{ user.get_full_name|default:"Not provided" }}</p>
+                                {% if user.wallet_address %}
+                                <p><strong>Wallet Address:</strong> {{ user.wallet_address }}</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Authentication Method</h5>
+                                {% if user.wallet_address %}
+                                <p>You are logged in with your blockchain wallet.</p>
+                                {% else %}
+                                <p>You are logged in with your email and password.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- New sections for blockchain functionality -->
+                <div class="row mt-4">
+                    <div class="col-md-12">
+                        <h5>Blockchain Features</h5>
+                        <div class="list-group">
+                            <a href="{% url 'registry_list' %}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                User Data Registries
+                                <span class="badge bg-primary rounded-pill">New</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

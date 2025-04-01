@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Data Registries{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Data Registries</h1>
+        <a href="{% url 'registry_create' %}" class="btn btn-success">Create New Registry</a>
+    </div>
+    
+    {% if registries %}
+    <div class="row">
+        {% for registry in registries %}
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">{{ registry.name }}</h5>
+                    <p class="card-text text-truncate">{{ registry.description }}</p>
+                    
+                    {% if registry.deployed %}
+                    <div class="badge bg-success mb-2">Deployed</div>
+                    {% else %}
+                    <div class="badge bg-warning mb-2">Not Deployed</div>
+                    {% endif %}
+                    
+                    <p class="small text-muted">
+                        {% if registry.admin == request.user %}
+                        <span class="badge bg-info">Administrator</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Member</span>
+                        {% endif %}
+                    </p>
+                    
+                    <div class="mt-3">
+                        <a href="{% url 'registry_detail' registry.id %}" class="btn btn-primary btn-sm">View Details</a>
+                    </div>
+                </div>
+                <div class="card-footer text-muted">
+                    Network: {{ registry.network }}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <p>No registries found. Click the button above to create your first data registry.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

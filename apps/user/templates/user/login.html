@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Django Blockchain{% endblock %}
+
+{% block extra_css %}
+<style>
+    .wallet-btn {
+        background-color: #3498db;
+        color: white;
+        transition: all 0.3s;
+    }
+    .wallet-btn:hover {
+        background-color: #2980b9;
+        color: white;
+    }
+    #wallet-status {
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="auth-container">
+            <h2 class="text-center mb-4">Login</h2>
+            
+            <!-- Traditional Login Form -->
+            <form method="post" id="login-form">
+                {% csrf_token %}
+                
+                {% for field in form %}
+                <div class="mb-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field.errors }}
+                    
+                    {% if field.field.widget.input_type == 'password' %}
+                        <input type="password" name="{{ field.name }}" id="{{ field.id_for_label }}" class="form-control">
+                    {% else %}
+                        <input type="text" name="{{ field.name }}" id="{{ field.id_for_label }}" class="form-control" 
+                               {% if field.value %}value="{{ field.value }}"{% endif %}>
+                    {% endif %}
+                    
+                    {% if field.help_text %}
+                    <small class="form-text text-muted">{{ field.help_text }}</small>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </div>
+            </form>
+            
+            <div class="auth-divider">
+                <span>OR</span>
+            </div>
+            
+            <!-- Blockchain Wallet Login -->
+            <div class="d-grid">
+                <button id="connect-wallet" class="btn wallet-btn">Connect with Ethereum Wallet</button>
+            </div>
+            
+            <div id="wallet-status" class="alert alert-info mt-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span id="wallet-address"></span>
+                    <button id="login-with-wallet" class="btn btn-sm btn-success">Login</button>
+                </div>
+            </div>
+            
+            <div class="mt-3 text-center">
+                <p>Don't have an account? <a href="{% url 'register' %}">Register</a></p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/web3@1.8.0/dist/web3.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const connectWalletBtn = document.getElementById('connect-wallet');
+        const loginWithWalletBtn = document.getElementById('login-with-wallet');
+        const walletStatus = document.getElementById('wallet-status');
+        const walletAddressSpan = document.getElementById('wallet-address');
+        
+        let currentAccount = null;
+        
+        // Check if MetaMask is installed
+        if (typeof window.ethereum === 'undefined') {
+            connectWalletBtn.textContent = 'MetaMask not installed';
+            connectWalletBtn.disabled = true;
+        }
+        
+        // Connect wallet button
+        connectWalletBtn.addEventListener('click', async function() {
+            try {
+                // Request account access
+                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+                handleAccountsChanged(accounts);
+            } catch (error) {
+                console.error('Error connecting to MetaMask:', error);
+            }
+        });
+        
+        // Login with wallet button
+        loginWithWalletBtn.addEventListener('click', async function() {
+            if (!currentAccount) return;
+            
+            try {
+                // Get nonce from server
+                const nonceResponse = await fetch('{% url "get_nonce" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        wallet_address: currentAccount
+                    })
+                });
+                
+                const nonceData = await nonceResponse.json();
+                
+                if (!nonceData.nonce) {
+                    throw new Error('Failed to get nonce');
+                }
+                
+                // Ask user to sign message with nonce
+                const message = `Sign this message to login: ${nonceData.nonce}`;
+                const signature = await ethereum.request({
+                    method: 'personal_sign',
+                    params: [message, currentAccount]
+                });
+                
+                // Verify signature with server
+                const verifyResponse = await fetch('{% url "verify_signature" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        wallet_address: currentAccount,
+                        signature: signature
+                    })
+                });
+                
+                const verifyData = await verifyResponse.json();
+                
+                if (verifyData.success) {
+                    window.location.href = '{% url "dashboard" %}';
+                } else {
+                    alert('Authentication failed: ' + (verifyData.error || 'Unknown error'));
+                }
+                
+            } catch (error) {
+                console.error('Error during wallet login:', error);
+                alert('Login failed: ' + error.message);
+            }
+        });
+        
+        // Handle account changes
+        function handleAccountsChanged(accounts) {
+            if (accounts.length === 0) {
+                walletStatus.style.display = 'none';
+                currentAccount = null;
+            } else {
+                currentAccount = accounts[0];
+                walletAddressSpan.textContent = formatAddress(currentAccount);
+                walletStatus.style.display = 'block';
+                connectWalletBtn.textContent = 'Wallet Connected';
+            }
+        }
+        
+        // Format address for display
+        function formatAddress(address) {
+            return address.slice(0, 6) + '...' + address.slice(-4);
+        }
+        
+        // Listen for account changes
+        if (window.ethereum) {
+            ethereum.on('accountsChanged', handleAccountsChanged);
+            
+            // Check if already connected
+            ethereum.request({ method: 'eth_accounts' })
+                .then(handleAccountsChanged)
+                .catch(console.error);
+        }
+    });
+</script>
+{% endblock %}
