@@ -1,16 +1,27 @@
 import logging
 import json
 import os
+import solcx
 from web3 import Web3
-from solcx import compile_source, install_solc
 from django.conf import settings
 from datetime import datetime
 from django.utils import timezone
 
-# Install specific Solidity compiler version
-install_solc('0.8.15')
-
 logger = logging.getLogger(__name__)
+
+# Instead of installing at import time, use a function
+def ensure_solc_installed():
+    try:
+        # Check if already installed
+        if '0.8.15' not in solcx.get_installed_solc_versions():
+            solcx.install_solc('0.8.15')
+        
+        # Set as the version to use
+        solcx.set_solc_version('0.8.15')
+        return True
+    except Exception as e:
+        logger.error(f"Failed to install solc: {str(e)}")
+        return False
 
 class RegistryDeploymentService:
     def __init__(self, network='sepolia'):
@@ -28,11 +39,14 @@ class RegistryDeploymentService:
     
     def compile_contract(self):
         """Compile the UserDataRegistry contract and return bytecode and ABI"""
+        # Ensure the compiler is installed
+        ensure_solc_installed()
+        
         contract_path = os.path.join(settings.BASE_DIR, 'contracts', 'UserDataRegistry.sol')
         with open(contract_path, 'r') as file:
             contract_source = file.read()
         
-        compiled_sol = compile_source(
+        compiled_sol = solcx.compile_source(
             contract_source,
             output_values=['abi', 'bin'],
             solc_version='0.8.15'
