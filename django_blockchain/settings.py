@@ -139,4 +139,5 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-WEB3_PROVIDER_URL = f'https://sepolia.infura.io/v3/{os.getenv("INFURA_API_KEY")}'
+INFURA_API_KEY = os.getenv("INFURA_API_KEY", "36cd48b277fe41a78b3e5864c0790293")
+WEB3_PROVIDER_URL = f'https://sepolia.infura.io/v3/{INFURA_API_KEY}'
