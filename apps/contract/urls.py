@@ -7,7 +7,10 @@ from .views import (
     AddRegistryUsersView,
     UpdateUserDataView,
     PrepareDeploymentView,
-    ConfirmDeploymentView
+    ConfirmDeploymentView,
+    PrepareUpdateUserDataView,
+    ConfirmUpdateUserDataView,
+    CheckDeploymentStatusView
 )
 
 urlpatterns = [
@@ -19,4 +22,7 @@ urlpatterns = [
     path('registries/<int:pk>/update-data/', UpdateUserDataView.as_view(), name='update_user_data'),
     path('registries/<int:pk>/prepare-deployment/', PrepareDeploymentView.as_view(), name='prepare_deployment'),
     path('registries/<int:pk>/confirm-deployment/', ConfirmDeploymentView.as_view(), name='confirm_deployment'),
+    path('registries/<int:pk>/prepare-update-data/', PrepareUpdateUserDataView.as_view(), name='prepare_update_data'),
+    path('registries/<int:pk>/confirm-update-data/', ConfirmUpdateUserDataView.as_view(), name='confirm_update_data'),
+    path('registries/<int:pk>/check-deployment/', CheckDeploymentStatusView.as_view(), name='check_deployment'),
 ]

@@ -8,9 +8,10 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
 
-from .models import UserDataRegistry, RegistryUser
-from .forms import RegistryCreationForm, UserAdditionForm, UserDataUpdateForm
-from .services import RegistryDeploymentService
+from apps.contract.models import UserDataRegistry, RegistryUser
+from apps.contract.forms import RegistryCreationForm, UserAdditionForm, UserDataUpdateForm
+from apps.contract.services import RegistryDeploymentService
+from apps.user.models import User
 
 import json
 from django.views.decorators.csrf import csrf_exempt
@@ -85,8 +86,8 @@ class CreateRegistryView(LoginRequiredMixin, CreateView):
 class DeployRegistryView(LoginRequiredMixin, View):
     # This is the right approach for MetaMask integration
     def post(self, request, pk):
-        registry = get_object_or_404(UserDataRegistry, pk=pk, admin=request.user)
-        
+        with transaction.atomic():
+            registry = UserDataRegistry.objects.select_for_update().get(pk=pk, admin=request.user)        
         # Check if already deployed
         if registry.deployed:
             messages.error(request, 'Registry is already deployed.')
@@ -309,14 +310,21 @@ class PrepareDeploymentView(LoginRequiredMixin, View):
                 initial_users.extend([addr for addr in whitelist_addresses if addr.strip()])
             
             # Prepare deployment - this can be slow but we've optimized it above
-            deployment_data = service.prepare_registry_deployment(wallet_address, initial_users)
+            try:
+                deployment_data = service.prepare_registry_deployment(wallet_address, initial_users)
+            except ValueError as e:
+                logger.error(f"Web3 value error: {str(e)}")
+                return JsonResponse({'success': False, 'error': 'Invalid blockchain data format'})
+            except Exception as e:
+                logger.error(f"Blockchain connection error: {str(e)}")
+                return JsonResponse({'success': False, 'error': 'Could not connect to blockchain'})
             
             # Return the response
             return JsonResponse(deployment_data)
             
         except Exception as e:
             logger.error(f"Error in PrepareDeploymentView: {str(e)}", exc_info=True)
-            return JsonResponse({'success': False, 'error': str(e)})
+            return JsonResponse({'success': False, 'error': 'An internal error occurred'})
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ConfirmDeploymentView(LoginRequiredMixin, View):
@@ -334,6 +342,9 @@ class ConfirmDeploymentView(LoginRequiredMixin, View):
             
             if not transaction_hash or not contract_address:
                 return JsonResponse({'success': False, 'error': 'Transaction hash and contract address required'})
+            
+            if not transaction_hash.startswith('0x') or len(transaction_hash) != 66:
+                return JsonResponse({'success': False, 'error': 'Invalid transaction hash format'})
             
             # Convert to checksum address
             try:
@@ -378,4 +389,201 @@ class ConfirmDeploymentView(LoginRequiredMixin, View):
             return JsonResponse({'success': True})
             
         except Exception as e:
-            return JsonResponse({'success': False, 'error': str(e)})
+            logger.error(f"Error in ConfirmDeploymentView: {str(e)}", exc_info=True)
+            return JsonResponse({'success': False, 'error': 'An internal error occurred'})
+
+@method_decorator(csrf_exempt, name='dispatch')
+class PrepareUpdateUserDataView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        try:
+            # Get registry and check user membership
+            registry = get_object_or_404(UserDataRegistry, pk=pk)
+            
+            if not registry.deployed:
+                return JsonResponse({'success': False, 'error': 'Registry not deployed yet'})
+            
+            # Verify user is a member
+            try:
+                registry_user = registry.users.get(user=request.user)
+                if not registry_user.is_authorized:
+                    return JsonResponse({'success': False, 'error': 'You are not authorized in this registry'})
+            except RegistryUser.DoesNotExist:
+                return JsonResponse({'success': False, 'error': 'You are not a member of this registry'})
+            
+            # Parse request data
+            data = json.loads(request.body)
+            wallet_address = data.get('wallet_address')
+            image_reference = data.get('image_reference')
+            
+            if not wallet_address:
+                return JsonResponse({'success': False, 'error': 'Wallet address required'})
+            if not image_reference:
+                return JsonResponse({'success': False, 'error': 'Image reference required'})
+                
+            # Create service
+            service = RegistryDeploymentService(network=registry.network)
+            
+            try:
+                # Use the new preparation method
+                tx_preparation = service.prepare_update_user_data(
+                    registry.address,
+                    wallet_address,
+                    image_reference
+                )
+                
+                if not tx_preparation['success']:
+                    return JsonResponse({'success': False, 'error': tx_preparation['error']})
+                
+                # Return the transaction data
+                return JsonResponse({
+                    'success': True,
+                    'transaction_data': tx_preparation['transaction_data']
+                })
+                
+            except ValueError as e:
+                logger.error(f"Web3 value error: {str(e)}")
+                return JsonResponse({'success': False, 'error': 'Invalid blockchain data format'})
+            except Exception as e:
+                logger.error(f"Blockchain connection error: {str(e)}")
+                return JsonResponse({'success': False, 'error': 'Could not connect to blockchain'})
+        
+        except Exception as e:
+            logger.error(f"Error in PrepareUpdateUserDataView: {str(e)}", exc_info=True)
+            return JsonResponse({'success': False, 'error': 'An internal error occurred'})
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ConfirmUpdateUserDataView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        try:
+            # Get registry and check user membership
+            registry = get_object_or_404(UserDataRegistry, pk=pk)
+            
+            # Parse request data
+            data = json.loads(request.body)
+            transaction_hash = data.get('transaction_hash')
+            image_reference = data.get('image_reference')
+            
+            if not transaction_hash or not image_reference:
+                return JsonResponse({
+                    'success': False, 
+                    'error': 'Transaction hash and image reference required'
+                })
+            
+            # Update user record in database
+            try:
+                registry_user = registry.users.get(user=request.user)
+                registry_user.image_reference = image_reference
+                registry_user.last_updated = timezone.now()
+                registry_user.save()
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'User data updated successfully'
+                })
+                
+            except RegistryUser.DoesNotExist:
+                return JsonResponse({
+                    'success': False, 
+                    'error': 'You are not a member of this registry'
+                })
+                
+        except Exception as e:
+            logger.error(f"Error in ConfirmUpdateUserDataView: {str(e)}", exc_info=True)
+            return JsonResponse({'success': False, 'error': 'An internal error occurred'})
+
+@method_decorator(csrf_exempt, name='dispatch')
+class CheckDeploymentStatusView(LoginRequiredMixin, View):
+    """
+    Verifies if a contract exists at the provided address and updates
+    the registry deployment status accordingly.
+    """
+    def post(self, request, pk):
+        try:
+            registry = get_object_or_404(UserDataRegistry, pk=pk, admin=request.user)
+            
+            # Parse request data
+            data = json.loads(request.body)
+            contract_address = data.get('contract_address')
+            
+            if not contract_address:
+                return JsonResponse({'success': False, 'error': 'Contract address required'})
+            
+            # Verify contract exists on the blockchain
+            service = RegistryDeploymentService(network=registry.network)
+            
+            try:
+                # Validate address format
+                contract_address = service.w3.to_checksum_address(contract_address)
+                
+                # Check contract code exists at the address (confirms it's a contract)
+                code = service.w3.eth.get_code(contract_address)
+                if code == b'' or code == '0x':
+                    return JsonResponse({
+                        'success': False, 
+                        'error': 'No contract found at this address'
+                    })
+                
+                # Get contract 
+                contract = service.get_registry_contract(contract_address)
+                
+                # Try to verify contract functions exist by calling a view function
+                # This helps confirm it's our contract type
+                try:
+                    admin = contract.functions.admin().call()
+                except Exception:
+                    is_authorized = contract.functions.isAuthorized(service.w3.to_checksum_address(request.user.wallet_address)).call()
+                    if not is_authorized:
+                        return JsonResponse({
+                            'success': False,
+                            'error': 'Contract exists but you don\'t appear to be authorized'
+                        })
+                
+                # Update registry status
+                registry.address = contract_address
+                registry.deployed = True
+                if not registry.deployment_date:
+                    registry.deployment_date = timezone.now()
+                registry.save()
+                
+                # Check if admin user entry exists
+                if not registry.users.filter(user=request.user).exists():
+                    RegistryUser.objects.create(
+                        registry=registry,
+                        user=request.user,
+                        wallet_address=request.user.wallet_address,
+                        is_authorized=True
+                    )
+                
+                # Process whitelist addresses if needed
+                whitelist_addresses = request.session.get('whitelist_addresses', [])
+                if whitelist_addresses:
+                    for address in whitelist_addresses:
+                        if not registry.users.filter(wallet_address=address).exists():
+                            user = User.objects.filter(wallet_address=address).first()
+                            RegistryUser.objects.create(
+                                registry=registry,
+                                user=user,  # May be None
+                                wallet_address=address,
+                                is_authorized=True
+                            )
+                    
+                    # Clear session
+                    if 'whitelist_addresses' in request.session:
+                        del request.session['whitelist_addresses']
+                        request.session.modified = True
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Registry deployment status updated successfully'
+                })
+                
+            except ValueError as e:
+                logger.error(f"Web3 value error: {str(e)}")
+                return JsonResponse({'success': False, 'error': 'Invalid blockchain data format'})
+            except Exception as e:
+                logger.error(f"Blockchain connection error: {str(e)}")
+                return JsonResponse({'success': False, 'error': 'Could not connect to blockchain'})
+            
+        except Exception as e:
+            logger.error(f"Error in CheckDeploymentStatusView: {str(e)}", exc_info=True)
+            return JsonResponse({'success': False, 'error': 'An internal error occurred'})

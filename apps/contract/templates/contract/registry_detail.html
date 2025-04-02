@@ -56,9 +56,24 @@
                             <form method="post" action="{% url 'registry_deploy' registry.id %}" id="deployForm">
                                 {% csrf_token %}
                                 <div class="d-grid">
-                                    <button type="button" class="btn btn-primary" id="deployBtn">Deploy Registry</button>
+                                    <button type="button" class="btn btn-primary mb-3" id="deployBtn">Deploy Registry</button>
                                 </div>
                             </form>
+                            
+                            <!-- Add this new section -->
+                            <hr>
+                            <h6>Already Deployed?</h6>
+                            <p class="small text-muted">
+                                If you've already deployed this registry but the status wasn't updated, 
+                                you can check the deployment status manually.
+                            </p>
+                            <div class="input-group mb-3">
+                                <input type="text" class="form-control" id="contractAddressInput" 
+                                       placeholder="Enter contract address (0x...)">
+                                <button class="btn btn-outline-secondary" type="button" id="checkDeploymentBtn">
+                                    Check Status
+                                </button>
+                            </div>
                         </div>
                     </div>
                     {% elif is_member and registry.deployed %}
@@ -171,58 +186,49 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/web3@1.8.0/dist/web3.min.js"></script>
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Initialize Web3 buttons if they exist
-        const deployBtn = document.getElementById('deployBtn');
-        const updateDataBtn = document.getElementById('updateDataBtn');
-        const addUsersBtn = document.getElementById('addUsersBtn');
+    // Helper function to get CSRF token
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Function to handle web3 interactions
+    async function handleWeb3Action(formId) {
+        if (typeof window.ethereum === 'undefined') {
+            alert('MetaMask is not installed. Please install MetaMask to interact with the blockchain.');
+            return false;
+        }
         
-        // Function to handle web3 interactions
-        async function handleWeb3Action(formId) {
-            if (typeof window.ethereum === 'undefined') {
-                alert('MetaMask is not installed. Please install MetaMask to interact with the blockchain.');
+        try {
+            // Request account access
+            const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts.length === 0) {
+                alert('Please connect your MetaMask wallet.');
                 return false;
             }
             
-            try {
-                // Request account access
-                const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
-                if (accounts.length === 0) {
-                    alert('Please connect your MetaMask wallet.');
-                    return false;
-                }
-                
-                // Submit the form
-                document.getElementById(formId).submit();
-                return true;
-                
-            } catch (error) {
-                console.error('Error connecting to MetaMask:', error);
-                alert('Error connecting to wallet: ' + error.message);
-                return false;
-            }
+            // Submit the form
+            document.getElementById(formId).submit();
+            return true;
+            
+        } catch (error) {
+            console.error('Error connecting to MetaMask:', error);
+            alert('Error connecting to wallet: ' + error.message);
+            return false;
         }
-        
-        // Set up event listeners
-        if (deployBtn) {
-            deployBtn.addEventListener('click', function() {
-                handleWeb3Action('deployForm');
-            });
-        }
-        
-        if (updateDataBtn) {
-            updateDataBtn.addEventListener('click', function() {
-                handleWeb3Action('updateDataForm');
-            });
-        }
-        
-        if (addUsersBtn) {
-            addUsersBtn.addEventListener('click', function() {
-                handleWeb3Action('addUsersForm');
-            });
-        }
-    });
+    }
 
+    // Deploy contract function
     async function deployContract() {
         if (typeof window.ethereum === 'undefined') {
             alert('MetaMask is not installed. Please install MetaMask to deploy contracts.');
@@ -293,7 +299,7 @@
         }
     }
 
-    // Add this new function to poll for transaction receipt
+    // Poll for transaction receipt function
     function pollForTransactionReceipt(txHash, attempts = 0) {
         const web3 = new Web3(window.ethereum);
         const maxAttempts = 30; // Try for about 5 minutes (30 * 10 seconds)
@@ -362,25 +368,224 @@
         }, 10000); // Poll every 10 seconds
     }
 
-    // Helper function to get CSRF token
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
+    // Update user data function
+    async function updateUserData() {
+        if (typeof window.ethereum === 'undefined') {
+            alert('MetaMask is not installed. Please install MetaMask to interact with the blockchain.');
+            return;
         }
-        return cookieValue;
+        
+        try {
+            // Get image reference from form
+            const imageReference = document.getElementById('id_image_reference').value;
+            if (!imageReference) {
+                alert('Please enter an image reference.');
+                return;
+            }
+            
+            // Request account access
+            const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+            if (accounts.length === 0) {
+                alert('Please connect your MetaMask wallet.');
+                return;
+            }
+            
+            // Display loading message
+            const updateBtn = document.getElementById('updateDataBtn');
+            updateBtn.disabled = true;
+            updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Preparing transaction...';
+            
+            // Get transaction data from server
+            const response = await fetch('{% url "prepare_update_data" registry.id %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    wallet_address: accounts[0],
+                    image_reference: imageReference
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to prepare transaction');
+            }
+            
+            // Update button text
+            updateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Waiting for confirmation...';
+            
+            // Sign and send transaction with MetaMask
+            const txHash = await ethereum.request({
+                method: 'eth_sendTransaction',
+                params: [data.transaction_data]
+            });
+            
+            // Notify about transaction
+            alert('Transaction sent! Hash: ' + txHash + '\n\nWaiting for confirmation. This may take a few minutes.');
+            
+            // Poll for transaction receipt
+            pollForUpdateTransaction(txHash, imageReference);
+            
+        } catch (error) {
+            console.error('Error updating user data:', error);
+            alert('Error updating user data: ' + error.message);
+            
+            // Reset button
+            const updateBtn = document.getElementById('updateDataBtn');
+            updateBtn.disabled = false;
+            updateBtn.textContent = 'Update Data';
+        }
     }
 
-    // Update the deployBtn event listener
-    if (deployBtn) {
-        deployBtn.addEventListener('click', deployContract);
+    // Poll for update transaction function
+    function pollForUpdateTransaction(txHash, imageReference, attempts = 0) {
+        const web3 = new Web3(window.ethereum);
+        const maxAttempts = 30; // Try for about 5 minutes (30 * 10 seconds)
+        
+        setTimeout(async () => {
+            try {
+                console.log(`Checking transaction receipt (attempt ${attempts + 1}/${maxAttempts})...`);
+                const receipt = await web3.eth.getTransactionReceipt(txHash);
+                
+                if (receipt) {
+                    // Transaction confirmed, notify the server
+                    const confirmResponse = await fetch('{% url "confirm_update_data" registry.id %}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCookie('csrftoken')
+                        },
+                        body: JSON.stringify({
+                            transaction_hash: txHash,
+                            image_reference: imageReference
+                        })
+                    });
+                    
+                    const confirmData = await confirmResponse.json();
+                    
+                    if (confirmData.success) {
+                        alert('Data updated successfully!');
+                        window.location.reload();
+                    } else {
+                        alert('Error confirming update: ' + confirmData.error);
+                        
+                        // Reset button
+                        const updateBtn = document.getElementById('updateDataBtn');
+                        updateBtn.disabled = false;
+                        updateBtn.textContent = 'Update Data';
+                    }
+                } else if (attempts < maxAttempts) {
+                    // Transaction not yet mined, keep polling
+                    pollForUpdateTransaction(txHash, imageReference, attempts + 1);
+                } else {
+                    // Give up after max attempts
+                    alert('Transaction is taking longer than expected. Please check the status on Etherscan later.');
+                    
+                    // Reset button
+                    const updateBtn = document.getElementById('updateDataBtn');
+                    updateBtn.disabled = false;
+                    updateBtn.textContent = 'Update Data';
+                }
+            } catch (error) {
+                console.error('Error checking transaction:', error);
+                
+                if (attempts < maxAttempts) {
+                    // Error occurred, but keep trying
+                    pollForUpdateTransaction(txHash, imageReference, attempts + 1);
+                } else {
+                    alert('Error checking transaction status: ' + error.message);
+                    
+                    // Reset button
+                    const updateBtn = document.getElementById('updateDataBtn');
+                    updateBtn.disabled = false;
+                    updateBtn.textContent = 'Update Data';
+                }
+            }
+        }, 10000); // Poll every 10 seconds
     }
+
+    // Check deployment status function
+    async function checkDeploymentStatus() {
+        const contractAddress = document.getElementById('contractAddressInput').value.trim();
+        
+        if (!contractAddress || !contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+            alert('Please enter a valid Ethereum contract address (0x...)');
+            return;
+        }
+        
+        // Display loading state
+        const checkDeploymentBtn = document.getElementById('checkDeploymentBtn');
+        checkDeploymentBtn.disabled = true;
+        checkDeploymentBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Checking...';
+        
+        try {
+            // Send request to check contract status
+            const response = await fetch('{% url "check_deployment" registry.id %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    contract_address: contractAddress
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                alert('Success! Registry deployment status updated. Refreshing page...');
+                window.location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Failed to validate contract'));
+                
+                // Reset button
+                checkDeploymentBtn.disabled = false;
+                checkDeploymentBtn.textContent = 'Check Status';
+            }
+        } catch (error) {
+            console.error('Error checking deployment status:', error);
+            alert('Error checking deployment status: ' + error.message);
+            
+            // Reset button
+            checkDeploymentBtn.disabled = false;
+            checkDeploymentBtn.textContent = 'Check Status';
+        }
+    }
+
+    // Initialize everything when DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Web3 buttons if they exist
+        const deployBtn = document.getElementById('deployBtn');
+        const updateDataBtn = document.getElementById('updateDataBtn');
+        const addUsersBtn = document.getElementById('addUsersBtn');
+        const checkDeploymentBtn = document.getElementById('checkDeploymentBtn');
+        
+        // Set up event listeners - ONLY ONCE
+        if (deployBtn) {
+            deployBtn.addEventListener('click', deployContract);
+        }
+        
+        if (updateDataBtn) {
+            updateDataBtn.addEventListener('click', updateUserData);
+        }
+        
+        if (addUsersBtn) {
+            addUsersBtn.addEventListener('click', function() {
+                handleWeb3Action('addUsersForm');
+            });
+        }
+        
+        if (checkDeploymentBtn) {
+            checkDeploymentBtn.addEventListener('click', checkDeploymentStatus);
+        }
+    });
 </script>
 {% endblock %}

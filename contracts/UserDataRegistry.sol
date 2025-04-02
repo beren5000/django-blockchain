@@ -4,15 +4,13 @@ pragma solidity ^0.8.0;
 contract UserDataRegistry {
     // Struct to store user data
     struct UserData {
-        string imageReference; // IPFS hash or URL to the image
+        string imageReference; 
         uint256 timestamp;    // When the data was last updated
         bool exists;          // Flag to check if data exists
     }
     
-    // Mapping to track authorized users
+    // users authorized to update data
     mapping(address => bool) public authorizedUsers;
-    
-    // Mapping to store user data
     mapping(address => UserData) public userData;
     
     // Contract admin
@@ -26,8 +24,6 @@ contract UserDataRegistry {
     // Constructor to initialize the contract with authorized users
     constructor(address[] memory _authorizedUsers) {
         admin = msg.sender;
-        
-        // Add all authorized users
         for (uint i = 0; i < _authorizedUsers.length; i++) {
             _authorizeUser(_authorizedUsers[i]);
         }
@@ -86,7 +82,6 @@ contract UserDataRegistry {
         emit UserDeauthorized(_user);
     }
     
-    // Function to get all data for a list of users (batch query)
     function getUsersData(address[] calldata _users) external view 
         returns (string[] memory imageReferences, uint256[] memory timestamps, bool[] memory dataExists) {
         

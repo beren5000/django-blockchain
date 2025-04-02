@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 from web3 import Web3
@@ -9,6 +10,8 @@ from django.utils import timezone
 # Install specific Solidity compiler version
 install_solc('0.8.15')
 
+logger = logging.getLogger(__name__)
+
 class RegistryDeploymentService:
     def __init__(self, network='sepolia'):
         self.network = network
@@ -18,6 +21,10 @@ class RegistryDeploymentService:
         else:
             # Default to local development network
             self.w3 = Web3(Web3.HTTPProvider('http://127.0.0.1:8545'))
+        
+        # Verify connection
+        if not self.w3.is_connected():
+            raise ConnectionError(f"Cannot connect to {network} network. Check your provider.")
     
     def compile_contract(self):
         """Compile the UserDataRegistry contract and return bytecode and ABI"""
@@ -72,7 +79,7 @@ class RegistryDeploymentService:
                 'nonce': nonce,
             }
             
-            tx_data = Contract.constructor(initial_users).buildTransaction(transaction)
+            tx_data = Contract.constructor(initial_users).build_transaction(transaction)
             
             signed_tx = self.w3.eth.account.sign_transaction(tx_data, private_key)
             
@@ -86,17 +93,21 @@ class RegistryDeploymentService:
                 'transaction_hash': tx_hash.hex(),
             }
         
+        except ValueError as e:
+            # More specific error handling for contract-related errors
+            if "execution reverted" in str(e):
+                return {'success': False, 'error': 'Contract execution reverted. You may not be authorized.'}
+            else:
+                return {'success': False, 'error': f'Invalid input: {str(e)}'}
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            # General error
+            return {'success': False, 'error': f'Blockchain error: {str(e)}'}
     
     def get_registry_contract(self, contract_address):
         """Get a contract instance at the specified address"""
         compiled_contract = self.compile_contract()
         contract = self.w3.eth.contract(
-            address=contract_address,
+            address=self.w3.to_checksum_address(contract_address),
             abi=compiled_contract['abi']
         )
         return contract
@@ -124,7 +135,7 @@ class RegistryDeploymentService:
             }
             
             # Build transaction
-            tx_data = contract.functions.updateUserData(image_reference).buildTransaction(transaction)
+            tx_data = contract.functions.updateUserData(image_reference).build_transaction(transaction)
             
             # Sign transaction
             signed_tx = self.w3.eth.account.sign_transaction(tx_data, private_key)
@@ -141,11 +152,15 @@ class RegistryDeploymentService:
                 'gas_used': tx_receipt.gasUsed
             }
             
+        except ValueError as e:
+            # More specific error handling for contract-related errors
+            if "execution reverted" in str(e):
+                return {'success': False, 'error': 'Contract execution reverted. You may not be authorized.'}
+            else:
+                return {'success': False, 'error': f'Invalid input: {str(e)}'}
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            # General error
+            return {'success': False, 'error': f'Blockchain error: {str(e)}'}
     
     def get_user_data(self, contract_address, user_address):
         """Get a user's data from the registry"""
@@ -165,11 +180,15 @@ class RegistryDeploymentService:
                 'timestamp_readable': datetime.fromtimestamp(result[1]).strftime('%Y-%m-%d %H:%M:%S') if result[1] > 0 else None
             }
             
+        except ValueError as e:
+            # More specific error handling for contract-related errors
+            if "execution reverted" in str(e):
+                return {'success': False, 'error': 'Contract execution reverted. You may not be authorized.'}
+            else:
+                return {'success': False, 'error': f'Invalid input: {str(e)}'}
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            # General error
+            return {'success': False, 'error': f'Blockchain error: {str(e)}'}
     
     def prepare_registry_deployment(self, owner_address, initial_users):
         """Prepare data for deploying registry contract via MetaMask"""
@@ -194,23 +213,32 @@ class RegistryDeploymentService:
             if owner_address not in initial_users:
                 initial_users.insert(0, owner_address)
             
-            # Get gas price - use a higher percentile for faster confirmations
+            # Get gas price
             gas_price = self.w3.eth.gas_price
             
-            # Estimate gas - don't use excessive amounts  
+            # Estimate gas
             try:
                 gas_estimate = Contract.constructor(initial_users).estimateGas({'from': owner_address})
                 gas_limit = int(gas_estimate * 1.2)  # Add 20% buffer
             except Exception as e:
                 # Fallback to a reasonable default if estimation fails
                 gas_limit = 5000000
+            
+            # Build dummy transaction to get data field
+            dummy_tx = Contract.constructor(initial_users).build_transaction({
+                'from': owner_address,
+                'gas': 0,  # MetaMask will estimate
+                'gasPrice': 0,  # MetaMask will set this
+                'nonce': 0  # MetaMask will set this
+            })
                 
             # Build transaction data for MetaMask
             transaction_data = {
                 'from': owner_address,
                 'gas': hex(gas_limit),  # MetaMask requires hex values
                 'gasPrice': hex(gas_price),
-                'data': Contract.constructor(initial_users).data_in_transaction
+                'data': dummy_tx['data'],
+                'chainId': hex(self.w3.eth.chain_id)  # Add chain ID
             }
             
             return {
@@ -221,6 +249,59 @@ class RegistryDeploymentService:
         except Exception as e:
             import traceback
             print(traceback.format_exc())  # Add detailed logging
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def prepare_update_user_data(self, contract_address, wallet_address, image_reference):
+        """Prepare data for updating user data via MetaMask"""
+        try:
+            # Get contract instance
+            contract = self.get_registry_contract(contract_address)
+            wallet_address = self.w3.to_checksum_address(wallet_address)
+            
+            # Get gas price
+            gas_price = self.w3.eth.gas_price
+            
+            # Estimate gas
+            try:
+                # Create function call object
+                function_call = contract.functions.updateUserData(image_reference)
+                
+                # Estimate gas
+                gas_estimate = function_call.estimateGas({'from': wallet_address})
+                gas_limit = int(gas_estimate * 1.2)  # Add 20% buffer
+            except Exception as e:
+                # Fallback to a reasonable default if estimation fails
+                gas_limit = 200000  # More conservative default for a simple update
+            
+            # Build dummy transaction to get data field
+            dummy_tx = contract.functions.updateUserData(image_reference).build_transaction({
+                'from': wallet_address,
+                'gas': 0,  # MetaMask will estimate
+                'gasPrice': 0,  # MetaMask will set this
+                'nonce': 0  # MetaMask will set this
+            })
+                
+            # Build transaction data for MetaMask
+            transaction_data = {
+                'from': wallet_address,
+                'to': contract_address,  # Important: include the "to" address
+                'gas': hex(gas_limit),  # MetaMask requires hex values
+                'gasPrice': hex(gas_price),
+                'data': dummy_tx['data'],
+                'chainId': hex(self.w3.eth.chain_id)  # Add chain ID
+            }
+            
+            return {
+                'success': True,
+                'transaction_data': transaction_data
+            }
+        
+        except Exception as e:
+            import traceback
+            logger.exception(traceback.format_exc())
             return {
                 'success': False,
                 'error': str(e)
